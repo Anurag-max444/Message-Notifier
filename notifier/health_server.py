@@ -15,10 +15,21 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        self._reply(include_body=True)
+
+    def do_HEAD(self):
+        # Uptime monitors (UptimeRobot, etc.) send HEAD requests.
+        # Without this, BaseHTTPRequestHandler auto-replies with
+        # 501 Not Implemented, which monitors treat as downtime.
+        self._reply(include_body=False)
+
+    def _reply(self, include_body: bool):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "2")
         self.end_headers()
-        self.wfile.write(b"ok")
+        if include_body:
+            self.wfile.write(b"ok")
 
     def log_message(self, format, *args):
         # Silence default request logging — keep bot logs clean.

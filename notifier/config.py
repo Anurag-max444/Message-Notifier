@@ -24,7 +24,7 @@ class Config:
     phone_number: Optional[str] = None  # only needed by generate_session.py
 
 
-NOTIFICATION_TEXT = "🔔 Session Activated.."
+NOTIFICATION_TEXT = "🔔 Session Activated."
 
 
 def _require(env: dict, name: str) -> str:

@@ -122,6 +122,22 @@ revoke ho jaata hai aur sab devices se logout ho jaate hain.
 karo, us account ko kabhi "Log out"/"Remove" mat karo jispe notifier
 chal raha hai.
 
+## UptimeRobot shows "501 Not Implemented" / ongoing incident
+
+Uptime monitors like UptimeRobot send **HEAD** requests, not GET.
+Python's `BaseHTTPRequestHandler` auto-replies with `501 Not Implemented`
+to any HTTP method that doesn't have a matching `do_*` handler — so a
+server with only `do_GET` looks "up" in a browser (which sends GET) but
+"down" to the monitor (which sends HEAD).
+
+`notifier/health_server.py` now defines both `do_GET` and `do_HEAD`,
+both returning `200`. Verify locally:
+
+```bash
+curl -I http://localhost:10000/   # HEAD request — should show HTTP/1.0 200
+curl    http://localhost:10000/   # GET request  — should print "ok"
+```
+
 ## "No open ports detected" on Render
 
 Render's **Web Service** plan expects something listening on a port;
