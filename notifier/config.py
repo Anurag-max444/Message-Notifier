@@ -24,7 +24,7 @@ class Config:
     phone_number: Optional[str] = None  # only needed by generate_session.py
 
 
-NOTIFICATION_TEXT = "🔔 Session Activated."
+NOTIFICATION_TEXT = "🔔 New message received on your Telegram account."
 
 
 def _require(env: dict, name: str) -> str:

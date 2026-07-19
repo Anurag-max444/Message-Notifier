@@ -13,12 +13,14 @@ ya count kabhi reveal nahi hote.
 │   ├── __init__.py
 │   ├── config.py                # Loads + validates all env vars (testable)
 │   ├── logic.py                  # Cooldown gate + message filter (pure, testable)
-│   └── logging_setup.py          # Logging config
+│   ├── logging_setup.py          # Logging config
+│   └── health_server.py          # Tiny HTTP server for Render's port scan
 ├── scripts/
 │   └── generate_session.py       # One-time local script to create STRING_SESSION
 ├── tests/
 │   ├── test_config.py
-│   └── test_logic.py
+│   ├── test_logic.py
+│   └── test_health_server.py
 ├── requirements.txt
 ├── requirements-dev.txt          # adds pytest
 ├── runtime.txt                   # Python version for Render
@@ -71,11 +73,17 @@ python bot.py
 
 ### 6. Deploy to Render
 
-- Service type: **Background Worker**
+- Service type: **Web Service** (Background Worker costs money on Render;
+  Web Service has a free tier, so this project runs a tiny built-in
+  health-check HTTP server just to satisfy Render's port scan — the
+  bot's real job is still just listening to Telegram, not serving web
+  traffic)
 - Build command: `pip install -r requirements.txt`
 - Start command: `python bot.py`
 - Set all env vars from `.env.example` (except `PHONE_NUMBER`, which
-  isn't needed by `bot.py`) in Render's Environment tab.
+  isn't needed by `bot.py`) in Render's Environment tab, plus `PORT`
+  (Render sets this automatically on Web Service plans, but `10000`
+  is used as a local fallback)
 
 ## Running Tests
 
@@ -113,6 +121,23 @@ revoke ho jaata hai aur sab devices se logout ho jaate hain.
 **Bachne ka tareeka:** account switch karte waqt "Add Account" use
 karo, us account ko kabhi "Log out"/"Remove" mat karo jispe notifier
 chal raha hai.
+
+## "No open ports detected" on Render
+
+Render's **Web Service** plan expects something listening on a port;
+without it, Render repeatedly logs this warning and can eventually
+fail the health check / cancel the deploy — even though the bot itself
+is running fine.
+
+`notifier/health_server.py` starts a tiny background HTTP server
+(always returns `200 ok`) purely to satisfy that port scan. It has no
+effect on the bot's actual behavior. Confirm it's working locally:
+
+```bash
+python bot.py
+# in another terminal:
+curl http://localhost:10000/
+```
 
 ## Bot "frozen"/limited by Telegram
 

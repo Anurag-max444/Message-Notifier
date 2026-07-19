@@ -35,6 +35,7 @@ from telethon.errors import (
 from notifier.config import load_config, ConfigError, NOTIFICATION_TEXT
 from notifier.logic import CooldownGate, should_process_message
 from notifier.logging_setup import setup_logging
+from notifier.health_server import start_health_server
 
 load_dotenv()
 log = setup_logging()
@@ -44,6 +45,12 @@ try:
 except ConfigError as e:
     log.error(str(e))
     sys.exit(1)
+
+# Render's Web Service plan expects an open port, or it repeatedly logs
+# "No open ports detected" and can eventually fail the health check.
+# This bot has no real HTTP work — this just satisfies that port scan.
+_health_thread = start_health_server()
+log.info("Health check server started.")
 
 gate = CooldownGate(cooldown_seconds=cfg.cooldown)
 
