@@ -24,11 +24,11 @@ class CooldownGate:
 
 def should_process_message(is_private: bool, is_outgoing: bool) -> bool:
     """
-    Returns True only for incoming private messages.
-    Groups, channels, and outgoing messages are ignored.
+    Returns True for any incoming message — private chats, groups,
+    channels, and bots all included. Only messages you send yourself
+    (outgoing) are ignored, so the cooldown gate doesn't fire off your
+    own activity.
     """
-    if not is_private:
-        return False
     if is_outgoing:
         return False
     return True

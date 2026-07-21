@@ -21,6 +21,8 @@ class Config:
     bot_token: str
     owner_id: int
     cooldown: int
+    supabase_url: str
+    supabase_key: str
     phone_number: Optional[str] = None  # only needed by generate_session.py
 
 
@@ -55,6 +57,8 @@ def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Conf
     api_hash = _require(env, "API_HASH")
     owner_id = _require_int(env, "OWNER_ID")
     cooldown = int(env.get("COOLDOWN", "30"))
+    supabase_url = _require(env, "SUPABASE_URL")
+    supabase_key = _require(env, "SUPABASE_SERVICE_KEY")
 
     if require_phone:
         # generate_session.py: STRING_SESSION/BOT_TOKEN not needed yet
@@ -66,6 +70,8 @@ def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Conf
             bot_token="",
             owner_id=owner_id,
             cooldown=cooldown,
+            supabase_url=supabase_url,
+            supabase_key=supabase_key,
             phone_number=phone_number,
         )
 
@@ -80,5 +86,7 @@ def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Conf
         bot_token=bot_token,
         owner_id=owner_id,
         cooldown=cooldown,
+        supabase_url=supabase_url,
+        supabase_key=supabase_key,
         phone_number=phone_number,
     )

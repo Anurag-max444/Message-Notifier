@@ -1,8 +1,9 @@
 # Telegram Message Notifier
 
-Jab bhi tumhare personal Telegram account par koi naya private message
-aaye, ek Bot tumhe generic notification bhejta hai — sender, content,
-ya count kabhi reveal nahi hote.
+Jab bhi tumhare personal Telegram account par koi naya incoming message
+aaye — private chat, group, ya bot, koi bhi — ek Bot tumhe generic
+notification bhejta hai. Sirf tumhare khud ke bheje messages ignore
+hote hain. Sender, content, ya count kabhi reveal nahi hote.
 
 ## Project Structure
 
@@ -44,8 +45,32 @@ pip install -r requirements-dev.txt
 cp .env.example .env
 ```
 
-Fill in `API_ID`, `API_HASH`, `PHONE_NUMBER`, and `OWNER_ID`.
-`STRING_SESSION` and `BOT_TOKEN` come after the next step.
+Fill in `API_ID`, `API_HASH`, `PHONE_NUMBER`, `OWNER_ID`, `SUPABASE_URL`,
+and `SUPABASE_SERVICE_KEY`. `STRING_SESSION` and `BOT_TOKEN` come after
+the next step.
+
+`SUPABASE_URL`/`SUPABASE_SERVICE_KEY` come from your Supabase project's
+Settings > API page. Run this SQL once in the Supabase SQL Editor to
+create the tables the bot needs:
+
+```sql
+create table if not exists notifier_vips (
+    user_id bigint primary key,
+    muted_until bigint not null default 0,
+    created_at timestamptz not null default now()
+);
+
+create table if not exists notifier_state (
+    id int primary key default 1,
+    cooldown_seconds int not null default 30,
+    global_mute_until bigint not null default 0,
+    constraint single_row check (id = 1)
+);
+
+insert into notifier_state (id, cooldown_seconds, global_mute_until)
+values (1, 30, 0)
+on conflict (id) do nothing;
+```
 
 ### 3. Generate STRING_SESSION (local machine only)
 
@@ -85,7 +110,23 @@ python bot.py
   (Render sets this automatically on Web Service plans, but `10000`
   is used as a local fallback)
 
-## Running Tests
+## Bot Control Commands
+
+DM the bot itself (`@your_bot_username`) — only `OWNER_ID` is allowed
+to use these, everyone else is ignored:
+
+| Command | Effect |
+|---|---|
+| `/skip` | Shows buttons (1/5/10/20/60 min) to temporarily mute all normal notifications |
+| `/cooldown <minutes>` | Sets the gap between notifications for normal (non-VIP) senders |
+| `/vip <user_id>` | That user's messages always notify instantly, ignoring mute/cooldown |
+| `/unvip <user_id>` | Removes VIP status |
+| `/vipmute <user_id> <minutes>` | Mutes just that one VIP user for X minutes |
+
+All of this state lives in Supabase (`notifier_state` and
+`notifier_vips` tables), so it survives bot restarts/redeploys.
+
+
 
 ```bash
 pip install -r requirements-dev.txt

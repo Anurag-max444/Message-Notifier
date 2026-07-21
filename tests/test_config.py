@@ -11,6 +11,8 @@ def base_env(**overrides):
         "BOT_TOKEN": "123456:fake_bot_token",
         "OWNER_ID": "987654321",
         "COOLDOWN": "30",
+        "SUPABASE_URL": "https://fake.supabase.co",
+        "SUPABASE_SERVICE_KEY": "fake_service_key",
     }
     env.update(overrides)
     return env
@@ -24,6 +26,22 @@ def test_load_config_success():
     assert cfg.bot_token == "123456:fake_bot_token"
     assert cfg.owner_id == 987654321
     assert cfg.cooldown == 30
+    assert cfg.supabase_url == "https://fake.supabase.co"
+    assert cfg.supabase_key == "fake_service_key"
+
+
+def test_missing_supabase_url_raises():
+    env = base_env()
+    del env["SUPABASE_URL"]
+    with pytest.raises(ConfigError, match="SUPABASE_URL"):
+        load_config(env)
+
+
+def test_missing_supabase_key_raises():
+    env = base_env()
+    del env["SUPABASE_SERVICE_KEY"]
+    with pytest.raises(ConfigError, match="SUPABASE_SERVICE_KEY"):
+        load_config(env)
 
 
 def test_cooldown_defaults_to_30_when_missing():

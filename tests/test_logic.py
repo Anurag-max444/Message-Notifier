@@ -35,8 +35,8 @@ class TestShouldProcessMessage:
     def test_private_incoming_message_is_processed(self):
         assert should_process_message(is_private=True, is_outgoing=False) is True
 
-    def test_group_message_is_ignored(self):
-        assert should_process_message(is_private=False, is_outgoing=False) is False
+    def test_group_incoming_message_is_processed(self):
+        assert should_process_message(is_private=False, is_outgoing=False) is True
 
     def test_outgoing_private_message_is_ignored(self):
         assert should_process_message(is_private=True, is_outgoing=True) is False
