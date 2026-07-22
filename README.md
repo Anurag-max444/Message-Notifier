@@ -1,30 +1,44 @@
 # Telegram Message Notifier
 
-Jab bhi tumhare personal Telegram account par koi naya incoming message
-aaye — private chat, group, ya bot, koi bhi — ek Bot tumhe generic
-notification bhejta hai. Sirf tumhare khud ke bheje messages ignore
-hote hain. Sender, content, ya count kabhi reveal nahi hote.
+Jab bhi tumhare personal Telegram account par koi naya incoming
+**private** message aaye (kisi user ya bot se), ek Bot tumhe generic
+notification bhejta hai. Groups/channels ignore hote hain. Sirf tumhare
+khud ke bheje messages bhi ignore hote hain. Sender, content, ya count
+kabhi reveal nahi hote.
+
+Bot ko DM karke runtime pe control kiya ja sakta hai — cooldown badlo,
+sab kuch temporarily mute karo, ya specific "VIP" users set karo jinke
+messages hamesha turant notify karein, mute/cooldown ignore karke.
 
 ## Project Structure
 
 ```
 .
-├── bot.py                      # Main entrypoint — run this in production
+├── bot.py                        # Thin entrypoint — wiring + main loop only
 ├── notifier/
 │   ├── __init__.py
-│   ├── config.py                # Loads + validates all env vars (testable)
-│   ├── logic.py                  # Cooldown gate + message filter (pure, testable)
-│   ├── logging_setup.py          # Logging config
-│   └── health_server.py          # Tiny HTTP server for Render's port scan
+│   ├── config.py                  # Loads + validates all env vars (testable)
+│   ├── store.py                   # Supabase persistence layer
+│   ├── state.py                   # Cooldown/mute/VIP business logic (testable)
+│   ├── logic.py                   # Pure message-filter logic (testable)
+│   ├── handlers.py                # user_client: watches for new messages
+│   ├── commands.py                # bot_client: owner-only commands + menu
+│   ├── logging_setup.py           # Console + rotating file logging
+│   └── health_server.py           # Tiny HTTP server for Render's port scan
 ├── scripts/
-│   └── generate_session.py       # One-time local script to create STRING_SESSION
+│   └── generate_session.py        # One-time local script to create STRING_SESSION
 ├── tests/
 │   ├── test_config.py
+│   ├── test_state.py
 │   ├── test_logic.py
+│   ├── test_commands.py
+│   ├── test_handlers.py
+│   ├── test_logging_setup.py
 │   └── test_health_server.py
+├── logs/                          # Rotating log files (bot.log, gitignored contents)
 ├── requirements.txt
-├── requirements-dev.txt          # adds pytest
-├── runtime.txt                   # Python version for Render
+├── requirements-dev.txt           # adds pytest
+├── runtime.txt                    # Python version for Render
 ├── render.yaml
 ├── pytest.ini
 ├── .env.example
@@ -113,28 +127,65 @@ python bot.py
 ## Bot Control Commands
 
 DM the bot itself (`@your_bot_username`) — only `OWNER_ID` is allowed
-to use these, everyone else is ignored:
+to use these, everyone else is silently ignored. Same list also shows
+up in Telegram's own "/" quick-command menu automatically (set via API
+on every startup — see `notifier/commands.py::register_bot_menu`).
 
+```
+/help - Sabhi commands ki list dikhaye
+/status - Current cooldown, mute aur VIP status dikhaye
+/skip - Sab normal notifications kuch der ke liye mute karo
+/resume - Active mute turant hata do
+/cooldown - Normal users ke notify ke beech ka gap set karo (minutes)
+/vip - Kisi user ko VIP banao — hamesha turant notify karega
+/unvip - VIP status hatao
+/vips - Sabhi VIP users ki list, mute/remove buttons ke saath
+/vipmute - Ek VIP user ko X minute ke liye mute karo
+```
+
+**Usage:**
 | Command | Effect |
 |---|---|
 | `/skip` | Shows buttons (1/5/10/20/60 min) to temporarily mute all normal notifications |
+| `/resume` | Clears an active `/skip` mute immediately |
 | `/cooldown <minutes>` | Sets the gap between notifications for normal (non-VIP) senders |
 | `/vip <user_id>` | That user's messages always notify instantly, ignoring mute/cooldown |
 | `/unvip <user_id>` | Removes VIP status |
+| `/vips` | Lists every VIP with inline "Mute 10m / Mute 60m / Remove" buttons |
 | `/vipmute <user_id> <minutes>` | Mutes just that one VIP user for X minutes |
+| `/status` | Shows current cooldown, whether globally muted (and for how long), VIP count |
+| `/help` | Shows this list |
 
 All of this state lives in Supabase (`notifier_state` and
 `notifier_vips` tables), so it survives bot restarts/redeploys.
 
+### BotFather setup (optional, cosmetic)
 
+Send these to `@BotFather` once to give your bot a proper identity:
+
+- `/setdescription` → shown on the bot's empty chat screen before first message:
+  > Personal notifier — DM ya koi private message aane par tumhe alert karta hai. Sirf owner ke liye control commands available hain.
+
+- `/setabouttext` → shown on the bot's profile page:
+  > Private message notifier bot.
+
+The actual command menu (`/help`, `/skip`, etc.) does **not** need to be
+set via BotFather's `/setcommands` — the bot pushes it automatically on
+every startup so it can never drift out of sync with the code.
+
+
+
+## Running Tests
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
 
-Tests cover `notifier/config.py` (env validation) and `notifier/logic.py`
-(cooldown gate, message filtering) — pure logic, no live Telegram
+Tests cover `notifier/config.py` (env validation), `notifier/state.py`
+(cooldown/mute/VIP logic), `notifier/logic.py` (message filtering),
+`notifier/commands.py` / `notifier/handlers.py` (registration wiring),
+and `notifier/logging_setup.py` — all pure/mocked, no live Telegram
 connection needed.
 
 ## "Please enter your phone (or bot token)" error
@@ -202,3 +253,32 @@ Yeh code-level issue nahi hai. Fix:
 1. `@BotFather` ko `/mybots` bhejo, bot select karo, status dekho
 2. Agar limited dikhe, `@BotSupport` ko contact karo, bot username +
    issue batao
+
+## Future Ideas
+
+Kuch aage ke improvements jo add kiye ja sakte hain (abhi nahi kiye,
+bas ideas hain):
+
+- **`/mutelist`** — active global mute aur har VIP-specific mute ek
+  saath, remaining time ke saath dikhaye (abhi `/status` sirf summary
+  deta hai).
+- **Sender name in notification** — abhi notification generic hai
+  (koi detail nahi). Ek `/reveal on|off` command se optional toggle ho
+  sakta hai jo sender ka first name (content nahi) include kare.
+- **Per-VIP custom cooldown** — abhi VIP ka matlab hai "no cooldown
+  at all". Ek beech ka option: VIP ko apna khud ka chhota cooldown do
+  (jaise 5 sec), poori tarah bypass ki jagah.
+- **Scheduled quiet hours** — jaise raat 11 baje se subah 7 baje tak
+  auto-mute, `/quiethours 23:00 07:00` command se set karke.
+- **Multiple owners** — abhi sirf ek `OWNER_ID`. Agar 2 log control
+  karna chahein (jaise tum aur ek trusted dost), `OWNER_IDS` list
+  support add ki ja sakti hai.
+- **Supabase Row Level Security (RLS)** — abhi service_role key use ho
+  raha hai jo RLS bypass karta hai (safe hai kyunki key sirf tumhare
+  Render env mein hai), lekin agar future mein koi frontend dashboard
+  banaya jaaye VIP list dekhne ke liye, tab RLS policies zaroori
+  hongi.
+- **Health check dashboard** — `notifier/health_server.py` abhi sirf
+  `200 ok` return karta hai. Isko ek chhota JSON status endpoint bana
+  sakte hain (`{"cooldown": 30, "vips": 2, "muted": false}`) jo
+  monitoring ke liye useful ho.
