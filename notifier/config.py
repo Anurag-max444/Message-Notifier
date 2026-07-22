@@ -20,6 +20,7 @@ class Config:
     string_session: str
     bot_token: str
     owner_id: int
+    control_owner_ids: tuple  # who's allowed to issue bot commands
     cooldown: int
     supabase_url: str
     supabase_key: str
@@ -44,6 +45,23 @@ def _require_int(env: dict, name: str) -> int:
         raise ConfigError(f"{name} must be an integer, got: {raw!r}")
 
 
+def _parse_control_owner_ids(raw: str, owner_id: int) -> tuple:
+    """
+    Comma-separated CONTROL_OWNER_IDS env var — who's allowed to issue
+    bot commands. OWNER_ID is always included even if not listed, since
+    it's the account that receives notifications and should always be
+    able to control them.
+    """
+    ids = {owner_id}
+    raw = raw.strip()
+    if raw:
+        try:
+            ids |= {int(part.strip()) for part in raw.split(",") if part.strip()}
+        except ValueError:
+            raise ConfigError(f"CONTROL_OWNER_IDS must be comma-separated integers, got: {raw!r}")
+    return tuple(sorted(ids))
+
+
 def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Config:
     """
     Load configuration from the given mapping (defaults to os.environ).
@@ -56,6 +74,7 @@ def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Conf
     api_id = _require_int(env, "API_ID")
     api_hash = _require(env, "API_HASH")
     owner_id = _require_int(env, "OWNER_ID")
+    control_owner_ids = _parse_control_owner_ids(env.get("CONTROL_OWNER_IDS", ""), owner_id)
     cooldown = int(env.get("COOLDOWN", "30"))
     supabase_url = _require(env, "SUPABASE_URL")
     supabase_key = _require(env, "SUPABASE_SERVICE_KEY")
@@ -69,6 +88,7 @@ def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Conf
             string_session="",
             bot_token="",
             owner_id=owner_id,
+            control_owner_ids=control_owner_ids,
             cooldown=cooldown,
             supabase_url=supabase_url,
             supabase_key=supabase_key,
@@ -85,6 +105,7 @@ def load_config(env: Optional[dict] = None, require_phone: bool = False) -> Conf
         string_session=string_session,
         bot_token=bot_token,
         owner_id=owner_id,
+        control_owner_ids=control_owner_ids,
         cooldown=cooldown,
         supabase_url=supabase_url,
         supabase_key=supabase_key,

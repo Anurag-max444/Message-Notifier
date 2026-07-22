@@ -25,9 +25,31 @@ def test_load_config_success():
     assert cfg.string_session == "fake_session_string"
     assert cfg.bot_token == "123456:fake_bot_token"
     assert cfg.owner_id == 987654321
+    assert cfg.control_owner_ids == (987654321,)
     assert cfg.cooldown == 30
     assert cfg.supabase_url == "https://fake.supabase.co"
     assert cfg.supabase_key == "fake_service_key"
+
+
+def test_control_owner_ids_defaults_to_owner_id_alone():
+    cfg = load_config(base_env())
+    assert cfg.control_owner_ids == (987654321,)
+
+
+def test_control_owner_ids_includes_extra_ids():
+    cfg = load_config(base_env(CONTROL_OWNER_IDS="111,222"))
+    assert cfg.control_owner_ids == (111, 222, 987654321)
+
+
+def test_control_owner_ids_dedupes_owner_id():
+    cfg = load_config(base_env(CONTROL_OWNER_IDS="987654321,111"))
+    assert cfg.control_owner_ids == (111, 987654321)
+
+
+def test_control_owner_ids_invalid_raises():
+    env = base_env(CONTROL_OWNER_IDS="abc,111")
+    with pytest.raises(ConfigError, match="CONTROL_OWNER_IDS"):
+        load_config(env)
 
 
 def test_missing_supabase_url_raises():

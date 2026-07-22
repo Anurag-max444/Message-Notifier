@@ -4,8 +4,9 @@ import pytest
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 
-from notifier.handlers import register_notify_handler
+from notifier.handlers import register_notify_handler, _build_notification_text
 from notifier.state import NotifyState
+from notifier.config import NOTIFICATION_TEXT
 
 
 class FakeCfg:
@@ -19,7 +20,7 @@ class FakeSupabase:
 
 @pytest.fixture
 def state():
-    return NotifyState(FakeSupabase(), cooldown_seconds=30, global_mute_until=0, vip_mute_until={})
+    return NotifyState(FakeSupabase(), cooldown_seconds=30, global_mute_until=0, vips={})
 
 
 @pytest.fixture
@@ -47,3 +48,37 @@ def test_bot_identity_dict_is_shared_by_reference(clients, state):
     register_notify_handler(user_client, bot_client, FakeCfg(), state, log, bot_identity)
     bot_identity["id"] = 555
     assert bot_identity["id"] == 555
+
+
+class FakeSender:
+    first_name = "Ayush"
+
+
+class FakeEvent:
+    async def get_sender(self):
+        return FakeSender()
+
+
+class FailingEvent:
+    async def get_sender(self):
+        raise RuntimeError("network blip")
+
+
+@pytest.mark.anyio
+async def test_notification_text_plain_when_reveal_disabled(state):
+    text = await _build_notification_text(state, FakeEvent())
+    assert text == NOTIFICATION_TEXT
+
+
+@pytest.mark.anyio
+async def test_notification_text_includes_sender_when_reveal_enabled(state):
+    state.reveal_sender = True
+    text = await _build_notification_text(state, FakeEvent())
+    assert text == f"{NOTIFICATION_TEXT} (from Ayush)"
+
+
+@pytest.mark.anyio
+async def test_notification_text_falls_back_gracefully_on_lookup_failure(state):
+    state.reveal_sender = True
+    text = await _build_notification_text(state, FailingEvent())
+    assert text == f"{NOTIFICATION_TEXT} (from someone)"

@@ -2,13 +2,16 @@
 
 Jab bhi tumhare personal Telegram account par koi naya incoming
 **private** message aaye (kisi user ya bot se), ek Bot tumhe generic
-notification bhejta hai. Groups/channels ignore hote hain. Sirf tumhare
-khud ke bheje messages bhi ignore hote hain. Sender, content, ya count
-kabhi reveal nahi hote.
+notification bhejta hai. Groups/channels by default ignore hote hain
+(runtime pe `/groups` se on kiye ja sakte hain). Sirf tumhare khud ke
+bheje messages hamesha ignore hote hain. Content kabhi reveal nahi
+hota; sender ka naam optional hai (`/reveal`).
 
-Bot ko DM karke runtime pe control kiya ja sakta hai — cooldown badlo,
-sab kuch temporarily mute karo, ya specific "VIP" users set karo jinke
-messages hamesha turant notify karein, mute/cooldown ignore karke.
+Bot ko DM karke runtime pe poori tarah control kiya ja sakta hai —
+cooldown badlo, sab kuch temporarily mute karo, roz ek fixed "quiet
+hours" window set karo, ya specific "VIP" users set karo jinke
+messages hamesha turant notify karein (ya apna khud ka custom
+cooldown le lein).
 
 ## Project Structure
 
@@ -18,11 +21,27 @@ messages hamesha turant notify karein, mute/cooldown ignore karke.
 ├── notifier/
 │   ├── __init__.py
 │   ├── config.py                  # Loads + validates all env vars (testable)
-│   ├── store.py                   # Supabase persistence layer
-│   ├── state.py                   # Cooldown/mute/VIP business logic (testable)
+│   ├── store/                     # Supabase persistence, split by concern
+│   │   ├── __init__.py             # Re-exports everything below
+│   │   ├── client.py                # Supabase client factory
+│   │   ├── state_store.py           # notifier_state table
+│   │   ├── vip_store.py             # notifier_vips table
+│   │   └── chat_store.py            # notifier_allowed_chats table
+│   ├── state.py                   # Cooldown/mute/VIP/allow-list business logic (testable)
 │   ├── logic.py                   # Pure message-filter logic (testable)
+│   ├── group_filter.py            # Pure per-chat allow-list logic (testable)
+│   ├── vip_labels.py               # Pure VIP-by-label grouping logic (testable)
 │   ├── handlers.py                # user_client: watches for new messages
-│   ├── commands.py                # bot_client: owner-only commands + menu
+│   ├── commands/                  # bot_client: owner-only commands, split by feature
+│   │   ├── __init__.py             # register_commands + register_bot_menu
+│   │   ├── command_list.py          # COMMAND_LIST — single source of truth
+│   │   ├── common.py                # is_owner / to_thread / fmt_seconds helpers
+│   │   ├── mute_commands.py         # /skip /resume /cooldown
+│   │   ├── groups_commands.py       # /groups /allowchat /disallowchat /allowedchats
+│   │   ├── reveal_commands.py       # /reveal
+│   │   ├── quiethours_commands.py   # /quiethours
+│   │   ├── vip_commands.py          # /vip /unvip /viplabel /vipmute /vipcooldown /vips
+│   │   └── status_commands.py       # /help /status /mutelist
 │   ├── logging_setup.py           # Console + rotating file logging
 │   └── health_server.py           # Tiny HTTP server for Render's port scan
 ├── scripts/
@@ -31,13 +50,15 @@ messages hamesha turant notify karein, mute/cooldown ignore karke.
 │   ├── test_config.py
 │   ├── test_state.py
 │   ├── test_logic.py
+│   ├── test_group_filter.py
+│   ├── test_vip_labels.py
 │   ├── test_commands.py
 │   ├── test_handlers.py
 │   ├── test_logging_setup.py
 │   └── test_health_server.py
 ├── logs/                          # Rotating log files (bot.log, gitignored contents)
 ├── requirements.txt
-├── requirements-dev.txt           # adds pytest
+├── requirements-dev.txt           # adds pytest, anyio
 ├── runtime.txt                    # Python version for Render
 ├── render.yaml
 ├── pytest.ini
@@ -71,6 +92,14 @@ create the tables the bot needs:
 create table if not exists notifier_vips (
     user_id bigint primary key,
     muted_until bigint not null default 0,
+    cooldown_seconds int,  -- null = full bypass (instant, every message)
+    label text,             -- optional, for grouping in /vips
+    created_at timestamptz not null default now()
+);
+
+create table if not exists notifier_allowed_chats (
+    chat_id bigint primary key,
+    label text,
     created_at timestamptz not null default now()
 );
 
@@ -78,11 +107,15 @@ create table if not exists notifier_state (
     id int primary key default 1,
     cooldown_seconds int not null default 30,
     global_mute_until bigint not null default 0,
+    allow_groups boolean not null default false,
+    reveal_sender boolean not null default false,
+    quiet_start text,  -- "HH:MM" or null
+    quiet_end text,    -- "HH:MM" or null
     constraint single_row check (id = 1)
 );
 
-insert into notifier_state (id, cooldown_seconds, global_mute_until)
-values (1, 30, 0)
+insert into notifier_state (id, cooldown_seconds, global_mute_until, allow_groups, reveal_sender)
+values (1, 30, 0, false, false)
 on conflict (id) do nothing;
 ```
 
@@ -126,10 +159,11 @@ python bot.py
 
 ## Bot Control Commands
 
-DM the bot itself (`@your_bot_username`) — only `OWNER_ID` is allowed
-to use these, everyone else is silently ignored. Same list also shows
-up in Telegram's own "/" quick-command menu automatically (set via API
-on every startup — see `notifier/commands.py::register_bot_menu`).
+DM the bot itself (`@your_bot_username`) — only IDs in
+`CONTROL_OWNER_IDS` (which always includes `OWNER_ID`) are allowed to
+use these, everyone else is silently ignored. Same list also shows up
+in Telegram's own "/" quick-command menu automatically (set via API on
+every startup — see `notifier/commands/__init__.py::register_bot_menu`).
 
 ```
 /help - Sabhi commands ki list dikhaye
@@ -137,10 +171,19 @@ on every startup — see `notifier/commands.py::register_bot_menu`).
 /skip - Sab normal notifications kuch der ke liye mute karo
 /resume - Active mute turant hata do
 /cooldown - Normal users ke notify ke beech ka gap set karo (minutes)
-/vip - Kisi user ko VIP banao — hamesha turant notify karega
+/groups - Group/channel messages ka notify on/off karo
+/allowchat - Sirf specific group/channel se notify karo (allow-list)
+/disallowchat - Ek chat ko allow-list se hatao
+/allowedchats - Allow-list me jo chats hain unki list dikhaye
+/reveal - Notification me sender ka naam dikhana on/off karo
+/quiethours - Roz ek fixed time window me auto-mute set karo
+/mutelist - Global mute + har VIP ka mute status, remaining time ke saath
+/vip - Kisi user ko VIP banao (optional label ke saath)
 /unvip - VIP status hatao
-/vips - Sabhi VIP users ki list, mute/remove buttons ke saath
+/viplabel - Kisi existing VIP ka label badlo ya hatao
+/vips - Sabhi VIP users ki list, label ke hisaab se grouped
 /vipmute - Ek VIP user ko X minute ke liye mute karo
+/vipcooldown - VIP ko full-bypass ki jagah apna khud ka cooldown do
 ```
 
 **Usage:**
@@ -149,15 +192,44 @@ on every startup — see `notifier/commands.py::register_bot_menu`).
 | `/skip` | Shows buttons (1/5/10/20/60 min) to temporarily mute all normal notifications |
 | `/resume` | Clears an active `/skip` mute immediately |
 | `/cooldown <minutes>` | Sets the gap between notifications for normal (non-VIP) senders |
-| `/vip <user_id>` | That user's messages always notify instantly, ignoring mute/cooldown |
+| `/groups` | Buttons to turn group/channel notifications on or off (off by default) |
+| `/allowchat <chat_id> ["label"]` | Narrows group/channel notifications to only this chat. Once any chat is added, only listed chats notify — everything else is skipped even with `/groups` on |
+| `/disallowchat <chat_id>` | Removes a chat from the allow-list. If the list becomes empty, all groups/channels are allowed again (as long as `/groups` is on) |
+| `/allowedchats` | Lists every chat in the allow-list with a "Remove" button each |
+| `/reveal` | Buttons to include the sender's first name in the notification text (off by default — notifications stay generic) |
+| `/quiethours <start> <end>` | e.g. `/quiethours 23:00 07:00` — auto-mutes normal notifications daily in that window (wraps midnight fine). `/quiethours off` clears it |
+| `/mutelist` | Detailed view: global mute + quiet hours + every individually-muted VIP, all with remaining time |
+| `/vip <user_id> ["label"]` | That user's messages always notify instantly, ignoring mute/cooldown, by default. Optional label groups them in `/vips` (e.g. `/vip 111 "College Group"`) |
 | `/unvip <user_id>` | Removes VIP status |
-| `/vips` | Lists every VIP with inline "Mute 10m / Mute 60m / Remove" buttons |
+| `/viplabel <user_id> "label"` | Relabels an existing VIP. `/viplabel <user_id> off` clears the label |
+| `/vips` | Lists every VIP grouped by label, each with inline "Mute 10m / Mute 60m / Remove" buttons |
 | `/vipmute <user_id> <minutes>` | Mutes just that one VIP user for X minutes |
-| `/status` | Shows current cooldown, whether globally muted (and for how long), VIP count |
+| `/vipcooldown <user_id> <seconds>` | Gives that VIP their own cooldown instead of full bypass (e.g. `/vipcooldown 111 5`) |
+| `/vipcooldown <user_id> off` | Restores full bypass (instant, every message) for that VIP |
+| `/status` | Quick summary: cooldown, mute, groups (+ allow-list count), reveal, quiet hours, VIP count |
 | `/help` | Shows this list |
 
-All of this state lives in Supabase (`notifier_state` and
-`notifier_vips` tables), so it survives bot restarts/redeploys.
+All of this state lives in Supabase (`notifier_state`, `notifier_vips`,
+and `notifier_allowed_chats` tables), so it survives bot
+restarts/redeploys.
+
+**Finding a group/channel's chat ID:** forward any message from that
+chat to [@userinfobot](https://t.me/userinfobot) or
+[@RawDataBot](https://t.me/RawDataBot) — it'll show the numeric ID
+(negative for groups/channels, e.g. `-100123456789`).
+
+### Multiple owners
+
+By default only `OWNER_ID` can use the commands above. To let a
+trusted second person (or account) control the bot too, set
+`CONTROL_OWNER_IDS` to a comma-separated list, e.g.:
+
+```
+CONTROL_OWNER_IDS=111111111,222222222
+```
+
+`OWNER_ID` is always included automatically even if you leave this
+blank or don't list it explicitly.
 
 ### BotFather setup (optional, cosmetic)
 
@@ -253,32 +325,3 @@ Yeh code-level issue nahi hai. Fix:
 1. `@BotFather` ko `/mybots` bhejo, bot select karo, status dekho
 2. Agar limited dikhe, `@BotSupport` ko contact karo, bot username +
    issue batao
-
-## Future Ideas
-
-Kuch aage ke improvements jo add kiye ja sakte hain (abhi nahi kiye,
-bas ideas hain):
-
-- **`/mutelist`** — active global mute aur har VIP-specific mute ek
-  saath, remaining time ke saath dikhaye (abhi `/status` sirf summary
-  deta hai).
-- **Sender name in notification** — abhi notification generic hai
-  (koi detail nahi). Ek `/reveal on|off` command se optional toggle ho
-  sakta hai jo sender ka first name (content nahi) include kare.
-- **Per-VIP custom cooldown** — abhi VIP ka matlab hai "no cooldown
-  at all". Ek beech ka option: VIP ko apna khud ka chhota cooldown do
-  (jaise 5 sec), poori tarah bypass ki jagah.
-- **Scheduled quiet hours** — jaise raat 11 baje se subah 7 baje tak
-  auto-mute, `/quiethours 23:00 07:00` command se set karke.
-- **Multiple owners** — abhi sirf ek `OWNER_ID`. Agar 2 log control
-  karna chahein (jaise tum aur ek trusted dost), `OWNER_IDS` list
-  support add ki ja sakti hai.
-- **Supabase Row Level Security (RLS)** — abhi service_role key use ho
-  raha hai jo RLS bypass karta hai (safe hai kyunki key sirf tumhare
-  Render env mein hai), lekin agar future mein koi frontend dashboard
-  banaya jaaye VIP list dekhne ke liye, tab RLS policies zaroori
-  hongi.
-- **Health check dashboard** — `notifier/health_server.py` abhi sirf
-  `200 ok` return karta hai. Isko ek chhota JSON status endpoint bana
-  sakte hain (`{"cooldown": 30, "vips": 2, "muted": false}`) jo
-  monitoring ke liye useful ho.
