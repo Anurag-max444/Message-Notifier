@@ -41,7 +41,11 @@ cooldown le lein).
 │   │   ├── reveal_commands.py       # /reveal
 │   │   ├── quiethours_commands.py   # /quiethours
 │   │   ├── vip_commands.py          # /vip /unvip /viplabel /vipmute /vipcooldown /vips
-│   │   └── status_commands.py       # /help /status /mutelist
+│   │   ├── status_commands.py       # /help /status /mutelist
+│   │   └── fallback_commands.py     # /start + unknown-command / non-command catch-all
+│   ├── lang/                      # User-facing UI text, centralized
+│   │   ├── __init__.py             # Re-exports lang.py
+│   │   └── lang.py                  # Welcome message, error templates, etc.
 │   ├── logging_setup.py           # Console + rotating file logging
 │   └── health_server.py           # Tiny HTTP server for Render's port scan
 ├── scripts/
@@ -53,9 +57,12 @@ cooldown le lein).
 │   ├── test_group_filter.py
 │   ├── test_vip_labels.py
 │   ├── test_commands.py
+│   ├── test_fallback_commands.py
+│   ├── test_lang.py
 │   ├── test_handlers.py
 │   ├── test_logging_setup.py
-│   └── test_health_server.py
+│   ├── test_health_server.py
+│   └── conftest.py                 # shared pytest fixtures
 ├── logs/                          # Rotating log files (bot.log, gitignored contents)
 ├── requirements.txt
 ├── requirements-dev.txt           # adds pytest, anyio
@@ -165,7 +172,12 @@ use these, everyone else is silently ignored. Same list also shows up
 in Telegram's own "/" quick-command menu automatically (set via API on
 every startup — see `notifier/commands/__init__.py::register_bot_menu`).
 
+Send `/start` any time for a short welcome message. If you mistype a
+command (or send plain text), the bot suggests the closest match or
+shows the full command list — no need to remember exact syntax.
+
 ```
+/start - Welcome message
 /help - Sabhi commands ki list dikhaye
 /status - Current cooldown, mute aur VIP status dikhaye
 /skip - Sab normal notifications kuch der ke liye mute karo
@@ -325,3 +337,18 @@ Yeh code-level issue nahi hai. Fix:
 1. `@BotFather` ko `/mybots` bhejo, bot select karo, status dekho
 2. Agar limited dikhe, `@BotSupport` ko contact karo, bot username +
    issue batao
+
+## `/groups` on karne ke baad bhi group messages notify nahi ho rahe
+
+Fixed. Root cause: Telethon ko har group/channel ka `access_hash`
+cache mein chahiye hota hai taaki uske messages ka event sahi se ban
+sake — aur `/reveal` ke liye sender ka naam resolve karne mein bhi
+yehi cache use hota hai. Bina is cache ke, group/channel updates
+silently drop ho sakte the (na koi error, na koi log — isliye pakadna
+mushkil tha).
+
+Fix: `bot.py` ab login ke turant baad ek baar `user_client.get_dialogs()`
+call karta hai, jo account ke saare chats (private, groups, channels)
+ka cache warm kar deta hai. Agar naye group mein baad mein add ho, us
+group se bhi notify chalu karne ke liye bot ko ek baar restart karna
+sabse reliable hai (dialog cache turant refresh ho jaata hai).

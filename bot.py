@@ -125,6 +125,16 @@ async def start_user_client():
     me = await user_client.get_me()
     log.info(f"User client logged in as: {me.first_name} (ID: {me.id})")
 
+    # HIDDEN BUG FIX: Telethon needs each chat's access_hash cached to
+    # correctly build events for groups/channels (and to resolve sender
+    # entities for /reveal). Without this, group/channel messages can be
+    # silently dropped and event.get_sender() can fail for them — which
+    # is exactly why /groups and /reveal appeared broken. Calling
+    # get_dialogs() once after login warms that cache for every chat
+    # the account is a member of.
+    dialogs = await user_client.get_dialogs()
+    log.info(f"Cached {len(dialogs)} dialog(s) for group/channel event resolution.")
+
 
 async def start_bot_client():
     await bot_client.start(bot_token=cfg.bot_token)

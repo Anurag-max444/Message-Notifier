@@ -24,6 +24,7 @@ from notifier.commands.reveal_commands import register_reveal_commands
 from notifier.commands.quiethours_commands import register_quiethours_commands
 from notifier.commands.vip_commands import register_vip_commands
 from notifier.commands.status_commands import register_status_commands, help_text
+from notifier.commands.fallback_commands import register_fallback_commands
 
 __all__ = ["COMMAND_LIST", "register_commands", "register_bot_menu", "help_text"]
 
@@ -47,3 +48,4 @@ def register_commands(bot_client, cfg, state, log):
     register_reveal_commands(bot_client, cfg, state)
     register_quiethours_commands(bot_client, cfg, state)
     register_vip_commands(bot_client, cfg, state)
+    register_fallback_commands(bot_client, cfg)  # must stay last: catch-all handler

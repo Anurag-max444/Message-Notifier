@@ -6,11 +6,12 @@ from telethon import events
 
 from notifier.commands.common import is_owner, fmt_seconds
 from notifier.commands.command_list import COMMAND_LIST
+from notifier.lang import HELP_HEADER
 
 
 def help_text() -> str:
     lines = [f"/{cmd} - {desc}" for cmd, desc in COMMAND_LIST]
-    return "🤖 **Available Commands**\n\n" + "\n".join(lines)
+    return f"{HELP_HEADER}\n\n" + "\n".join(lines)
 
 
 def register_status_commands(bot_client, cfg, state):
